@@ -1,0 +1,114 @@
+#!/usr/bin/env python
+"""WI - Wheel Installer
+
+This is a Python package installer relying on wheels and asyncio with the
+sole goal of installing packages as fast as possible while relying as little
+as possible on system's config, such as compilers or development packages
+(thanks to wheels).
+
+The idea is to enable non-blocking IO operations and take advantage of the
+idle time to install already downloaded packages.
+
+However, keep in mind this isn't meant to be a replacement for pip.
+
+If anything, this should help spread the Python Wheels usage and enable
+more discussions and work around it.
+
+    AUTHORS:
+
+        Carlos H. Romano <chromano@gmail.com>
+"""
+import asyncio
+import os
+import sys
+import tempfile
+
+import aiohttp
+from aiohttp.client_exceptions import ContentTypeError
+from wheel.install import WheelFile
+
+PACKAGES_REPO_URL = 'https://pypi.python.org/pypi'
+
+def log(msg):
+    sys.stderr.write(msg + '\n')
+
+async def metadata(package, version):
+    """Fetches metadata from the packages repository. Returns None
+    if there's no package or package version available."""
+    async with aiohttp.ClientSession() as session:
+        url = [PACKAGES_REPO_URL, package]
+        if version:
+            url.append(version)
+        url.append('json')
+        async with session.get('/'.join(url)) as response:
+            try:
+                return await response.json()
+            except ContentTypeError:
+                return
+
+async def download(url, dest):
+    """Downloads an URL into the given machine's file path."""
+    async with aiohttp.ClientSession() as session:
+        log('Downloading ' + url)
+        async with session.get(url) as response:
+            open(dest, 'wb+').write(await response.read())
+            log('Downloaded ' + url)
+
+async def install(name, version):
+    """Install a wheel package into the system. It will try to use the
+    best match for the machine, considering the architecture and OS.
+
+    If the package can't be found, 
+    """
+    package = await metadata(name, version)
+    if not package:
+        return ('missing', name, version)
+    releases = package['releases'][package['info']['version']]
+    with tempfile.TemporaryDirectory() as tmpdir: 
+        # Sorting a list of wheel.install.WheelFile instances will arrange
+        # elements so the first is always the best match for the local env.
+        wheels = sorted(
+            ((release, WheelFile(os.path.join(tmpdir, release['filename'])))
+                for release in releases
+                    if release['filename'].endswith('.whl')),
+            key=lambda item: item[1])
+        if not wheels:
+            return ('nowheel', name, version)
+        meta, wheel = wheels[0]
+        await download(meta['url'], wheel.filename)
+
+        wheel.install(force=True)
+
+async def main(requirements):
+    """Install packages as defined in a requirements file. Any package
+    that can't be installed will display in stdout."""
+    ops = []
+    with open(requirements, 'r') as fp:
+        for line in fp:
+            line = line.strip()
+            if '==' in line:
+                package, version = line.split('==', 1)
+            else:
+                package, version = (line, '')
+
+            ops.append(install(package, version))
+
+    results = await asyncio.gather(*ops)
+    for failure in results:
+        if failure:
+            _, package, version = failure
+            print(f'{package}=={version}')
+
+    log('wiiii')
+
+if __name__ == '__main__':
+    log('starting')
+
+    if len(sys.argv) > 1:
+        requirements = sys.argv[1]
+    else:
+        requirements = 'requirements.txt'
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main(requirements))
+    loop.close()

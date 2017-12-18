@@ -1,0 +1,5 @@
+aiohttp==2.3.6
+async-timeout==2.0.0
+chardet==3.0.4
+multidict==3.3.2
+yarl==0.16.0
