@@ -71,8 +71,8 @@ async def install(name, version):
             ((release, WheelFile(os.path.join(tmpdir, release['filename'])))
                 for release in releases
                     if release['filename'].endswith('.whl')),
-            key=lambda item: item[1])
-        if not wheels:
+            key=lambda item: item[1].rank)
+        if not wheels or not wheels[0][1].compatible:
             return ('nowheel', name, version)
         meta, wheel = wheels[0]
         await download(meta['url'], wheel.filename)
