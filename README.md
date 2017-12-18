@@ -25,7 +25,7 @@ downloaded.
 
 ## Installation
 
-    $ pip install wi
+    $ pip install wi aiohttp
 
 ## Usage
 
