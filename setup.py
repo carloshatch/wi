@@ -8,6 +8,8 @@ setup(
     author='Carlos H. Romano',
     author_email='chromano@gmail.com',
     license='MIT',
+    python_requires='>=3.6, <4',
+    install_requires=['wheel', 'aiohttp'],
     scripts=[
         './wi'
     ],
