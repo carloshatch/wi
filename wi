@@ -75,7 +75,6 @@ async def metadata(repo_url, package, version):
                 return await response.text()
             except ContentTypeError as err:
                 log('Error retrieving {}'.format(url))
-                print(response)
                 return
 
 
@@ -127,7 +126,7 @@ async def install(repo_url, name, version):
             return ('nowheel', name, version)
 
         await download(meta['url'], wheel.filename)
-        print('Installing', wheel.filename)
+        log('Installing', wheel.filename)
         wheel.install(force=True)
 
 async def main(repo_url, requirements):
