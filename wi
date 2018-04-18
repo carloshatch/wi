@@ -69,8 +69,11 @@ async def metadata(repo_url, package):
     if there's no package."""
     async with aiohttp.ClientSession() as session:
         url = [repo_url, package]
-        async with session.request('GET', '/'.join(url)) as response:
+        full_url = '/'.join(url)
+        async with session.request('GET', full_url) as response:
             if response.status != 200:
+                log('Error accessing {} [{}]'.format(full_url,
+                                                     response.status))
                 return
 
             try:
