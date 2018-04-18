@@ -24,6 +24,7 @@ import sys
 import tempfile
 import argparse
 import re
+import http.client
 
 import aiohttp
 from aiohttp.client_exceptions import ContentTypeError
@@ -71,7 +72,7 @@ async def metadata(repo_url, package):
         url = [repo_url, package]
         full_url = '/'.join(url)
         async with session.request('GET', full_url) as response:
-            if response.status != 200:
+            if response.status != http.client.OK:
                 log('Error accessing {} [{}]'.format(full_url,
                                                      response.status))
                 return
