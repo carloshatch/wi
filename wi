@@ -23,6 +23,7 @@ import os
 import sys
 import tempfile
 import argparse
+import re
 
 import aiohttp
 from aiohttp.client_exceptions import ContentTypeError
@@ -58,19 +59,20 @@ class PyPIParser(HTMLParser):
             self.current['filename'] = data
 
 
-PACKAGES_REPO_URL = 'https://pypi.python.org/pypi'
+
+def log(*msgs):
+    sys.stderr.write(' '.join(msgs) + '\n')
 
 
-def log(msg):
-    sys.stderr.write(msg + '\n')
-
-
-async def metadata(repo_url, package, version):
+async def metadata(repo_url, package):
     """Fetches metadata from the packages repository. Returns None
-    if there's no package or package version available."""
+    if there's no package."""
     async with aiohttp.ClientSession() as session:
         url = [repo_url, package]
         async with session.request('GET', '/'.join(url)) as response:
+            if response.status != 200:
+                return
+
             try:
                 return await response.text()
             except ContentTypeError as err:
@@ -87,18 +89,35 @@ async def download(url, dest):
             log('Downloaded ' + url)
 
 
+# The format of the wheel filename is, (PEP 427)
+# {distribution}-{version}(-{build tag})?-{python tag}-
+# {abi tag}-{platform tag}.whl
+WHEEL_REGEX = r'(?P<distribution>[\w\d.]+)-(?P<version>[\d.]+)-(\S+).whl'
+WHEEL_MATCH = re.compile(WHEEL_REGEX)
+
+def check_version_in_filename(filename, version):
+    """
+    Checks that the wheel filename has the proper version
+    """
+    result = re.match(WHEEL_MATCH, filename)
+    if not result:
+        # Not a wheel file
+        return False
+
+    return result.groupdict()['version'] == version
+
+
 async def install(repo_url, name, version):
     """Install a wheel package into the system. It will try to use the
     best match for the machine, considering the architecture and OS.
 
     If the package can't be found,
     """
-    package = await metadata(repo_url, name, version)
+    package = await metadata(repo_url, name)
+    if not package:
+        return ('missing', name, version)
     parser = PyPIParser()
     parser.feed(package)
-    # if not package:
-    #     return ('missing', name, version)
-    # releases = package['releases'][package['info']['version']]
     releases = parser.all_data
     # Create the full URLs
     for release in releases:
@@ -109,7 +128,8 @@ async def install(repo_url, name, version):
 
     # Filter by version, if required
     if version:
-        releases = [r for r in releases if version in r['filename']]
+        releases = [r for r in releases
+                    if check_version_in_filename(r['filename'], version)]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Sorting a list of wheel.install.WheelFile instances will arrange

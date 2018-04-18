@@ -8,3 +8,6 @@ wi
 
 # Adding an index url
 wi --index-url=https://pypi.python.org/simple
+
+# Using a wrong index
+wi --index-url=https://pypi.python.org/badindex
