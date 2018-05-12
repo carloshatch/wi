@@ -22,29 +22,67 @@ import asyncio
 import os
 import sys
 import tempfile
+import argparse
+import re
+import http.client
 
 import aiohttp
 from aiohttp.client_exceptions import ContentTypeError
 from wheel.install import WheelFile
 
-PACKAGES_REPO_URL = 'https://pypi.python.org/pypi'
+from html.parser import HTMLParser
 
-def log(msg):
-    sys.stderr.write(msg + '\n')
 
-async def metadata(package, version):
+class PyPIParser(HTMLParser):
+
+    def __init__(self, *args, **kwargs):
+        # Format is
+        # <a href='url'>filename</a>
+        self.all_data = []
+        self.current = None
+        super().__init__(*args, **kwargs)
+
+    def handle_starttag(self, tag, attrs):
+        # Keep only references in <a> tags
+        if tag == 'a':
+            self.current = {
+                'href': [value for attr, value in attrs if attr == 'href'][0],
+            }
+        else:
+            self.current = None
+
+    def handle_endtag(self, tag):
+        if self.current:
+            self.all_data.append(self.current)
+
+    def handle_data(self, data):
+        if self.current:
+            self.current['filename'] = data
+
+
+
+def log(*msgs):
+    sys.stderr.write(' '.join(msgs) + '\n')
+
+
+async def metadata(repo_url, package):
     """Fetches metadata from the packages repository. Returns None
-    if there's no package or package version available."""
+    if there's no package."""
     async with aiohttp.ClientSession() as session:
-        url = [PACKAGES_REPO_URL, package]
-        if version:
-            url.append(version)
-        url.append('json')
-        async with session.get('/'.join(url)) as response:
-            try:
-                return await response.json()
-            except ContentTypeError:
+        url = [repo_url, package]
+        full_url = '/'.join(url)
+        async with session.request('GET', full_url) as response:
+            if response.status != http.client.OK:
+                log('Error accessing {} [{}]'.format(full_url,
+                                                     response.status))
                 return
+
+            try:
+                return await response.text()
+            except ContentTypeError as err:
+                log('Error retrieving {}'.format(url))
+                return
+
 
 async def download(url, dest):
     """Downloads an URL into the given machine's file path."""
@@ -54,17 +92,50 @@ async def download(url, dest):
             open(dest, 'wb+').write(await response.read())
             log('Downloaded ' + url)
 
-async def install(name, version):
+
+# The format of the wheel filename is, (PEP 427)
+# {distribution}-{version}(-{build tag})?-{python tag}-
+# {abi tag}-{platform tag}.whl
+WHEEL_REGEX = r'(?P<distribution>[\w\d.]+)-(?P<version>[\d.]+)-(\S+).whl'
+WHEEL_MATCH = re.compile(WHEEL_REGEX)
+
+def check_version_in_filename(filename, version):
+    """
+    Checks that the wheel filename has the proper version
+    """
+    result = re.match(WHEEL_MATCH, filename)
+    if not result:
+        # Not a wheel file
+        return False
+
+    return result.groupdict()['version'] == version
+
+
+async def install(repo_url, name, version):
     """Install a wheel package into the system. It will try to use the
     best match for the machine, considering the architecture and OS.
 
-    If the package can't be found, 
+    If the package can't be found,
     """
-    package = await metadata(name, version)
+    package = await metadata(repo_url, name)
     if not package:
         return ('missing', name, version)
-    releases = package['releases'][package['info']['version']]
-    with tempfile.TemporaryDirectory() as tmpdir: 
+    parser = PyPIParser()
+    parser.feed(package)
+    releases = parser.all_data
+    # Create the full URLs
+    for release in releases:
+        if 'http' in release['href']:
+            release['url'] = release['href']
+        else:
+            release['url'] = '/'.join([repo_url, release['href']])
+
+    # Filter by version, if required
+    if version:
+        releases = [r for r in releases
+                    if check_version_in_filename(r['filename'], version)]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
         # Sorting a list of wheel.install.WheelFile instances will arrange
         # elements so the first is always the best match for the local env.
         wheels = sorted(
@@ -79,9 +150,10 @@ async def install(name, version):
             return ('nowheel', name, version)
 
         await download(meta['url'], wheel.filename)
+        log('Installing', wheel.filename)
         wheel.install(force=True)
 
-async def main(requirements):
+async def main(repo_url, requirements):
     """Install packages as defined in a requirements file. Any package
     that can't be installed will display in stdout."""
     ops = []
@@ -93,7 +165,7 @@ async def main(requirements):
             else:
                 package, version = (line, '')
 
-            ops.append(install(package, version))
+            ops.append(install(repo_url, package, version))
 
     results = await asyncio.gather(*ops)
     for failure in results:
@@ -104,13 +176,25 @@ async def main(requirements):
     log('wiiii')
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='The wheel installer')
+    parser.add_argument('--index-url', type=str,
+                        default='https://pypi.python.org/simple',
+                        help='Base URL of Python Package Index (default https://pypi.python.org/simple). '
+                             'This should point to a repository compliant with PEP 503 '
+                             '(the simple repository API) or a local directory laid '
+                             'out in the same formatIndex to use')
+    parser.add_argument('--trusted-host', type=str, default=None,
+                        help='Mark this host as trusted, even though it does not have valid or any HTTPS')
+    parser.add_argument('requirements', type=str, nargs='?',
+                        default='requirements.txt',
+                        help='Install from the given requirements file, default requirements.txt')
+    args = parser.parse_args()
+
+    repo_url = args.index_url
+    requirements = args.requirements
+
     log('starting')
 
-    if len(sys.argv) > 1:
-        requirements = sys.argv[1]
-    else:
-        requirements = 'requirements.txt'
-
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main(requirements))
+    loop.run_until_complete(main(repo_url, requirements))
     loop.close()

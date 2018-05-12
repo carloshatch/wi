@@ -20,12 +20,12 @@ are not found.
 ## No idle time
 
 This tool is based on asyncio, in such a way that while packages are being
-downloaded, the tool will perform the installation of packges already
+downloaded, the tool will perform the installation of packages already
 downloaded.
 
 ## Installation
 
-    $ pip install wi aiohttp
+    $ pip install wi
 
 ## Usage
 
@@ -69,3 +69,10 @@ open a ticket and let's discuss it there!
 
 It is also important to share this tool so we can advance with the current
 status os python wheels and pip itself.
+
+## Running tests
+
+Minimal tests are present runing tox
+
+    $ pip install tox
+    $ tox
