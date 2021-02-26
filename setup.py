@@ -9,7 +9,7 @@ setup(
     author_email='chromano@gmail.com',
     license='MIT',
     python_requires='>=3.6, <4',
-    install_requires=['wheel==0.30.0', 'aiohttp==3.1.0'],
+    install_requires=['wheel==0.30.0', 'aiohttp==3.7.4'],
     scripts=[
         './wi'
     ],
